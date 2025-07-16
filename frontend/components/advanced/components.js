@@ -80,7 +80,8 @@ const componentsInit = async () => {
             value: 1000 // This is for the initial /payments call, you might want to make this dynamic too
           },
           authenticationData: {
-            authenticationOnly: true,
+            //not needed here
+            //authenticationOnly: true,
             threeDSRequestData: {
               nativeThreeDS: "preferred"
             }
