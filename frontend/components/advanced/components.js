@@ -212,10 +212,11 @@ export async function paymentAuthorisationResponse() {
       authenticationResponse: paymentDetailsResponseGlobal.additionalData?.threeDAuthenticatedResponse,
       directoryResponse: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.transStatus'],
       cavv: paymentDetailsResponseGlobal.additionalData?.cavv,
-      dsTransID: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.dsTransID'],
+      //dsTransID: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.dsTransID'],
       eci: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.eci'],
       threeDSVersion: paymentDetailsResponseGlobal.additionalData?.threeDSVersion,
     },
+    dsTransID: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.dsTransID'],
     metaData: {
       pspRefFromDetails: paymentDetailsResponseGlobal.pspReference
     },
