@@ -51,7 +51,7 @@ const componentsInit = async () => {
     console.log("/payments/details response:", paymentDetailsResponse);
     console.log("Auth-only response for redirect is here: ", paymentDetailsResponse.additionalData);
 
-    renderResultTemplate(paymentResponse.resultCode); // Fix: was using paymentDetailsResponse.resultCode twice
+    renderResultTemplate(paymentDetailsResponse.resultCode);
   } else {
     const paymentMethods = await getPaymentMethods();
     console.log("paymentMethods response:", paymentMethods);
@@ -99,7 +99,22 @@ const componentsInit = async () => {
         if (paymentResponse.resultCode === "Authorised") {
           console.log(`response is ${paymentResponse.resultCode}, unmounting component and rendering result`);
           renderResultTemplate(paymentResponse.resultCode);
-        } else {
+        } else if (paymentResponse.resultCode === "AuthenticationNotRequired") {
+          console.log("Authentication is not required, proceeding directly to authorisation.");
+          console.log("response pspReference: ", paymentResponse.pspReference);
+
+          // Store necessary data for authorisation
+          paymentDetailsResponseGlobal = {
+            pspReference: paymentResponse.pspReference,
+            additionalData: {}
+          };
+          // IMPORTANT: Do NOT store paymentData here. It is not provided in this response.
+
+          // Unmount the Adyen component and display the authorization UI
+          component.unmount();
+          renderResultTemplate(paymentResponse.resultCode);
+          
+        } else { // This is for all other action types (e.g., redirect, 3ds2fingerprint)
           const paymentData = paymentResponse.action?.paymentData;
           console.log("Stored paymentDataPaymentsAuth:", paymentData);
           localStorage.setItem("paymentDataPaymentsAuth", JSON.stringify(paymentData));
@@ -113,39 +128,22 @@ const componentsInit = async () => {
       console.log("onadditionaldetails event", state);
 
       const requestDataPaymentsDetails = {
-        ...state.data,
-        authenticationData: {
-          authenticationOnly: true
-        },
-        shopperConversionId: `shopper123`,
-        metaData: {
-          testData: `1234`
-        }
+        ...state.data
       };
 
       const paymentDetailsResponse = await postDoPaymentDetails(requestDataPaymentsDetails);
       console.log("requestData for payments/details: ", requestDataPaymentsDetails);
-      renderResultTemplate(paymentDetailsResponse.resultCode);
-      console.log("payments details response for Authorisation: ", paymentDetailsResponse);
+      console.log("payments details response:", paymentDetailsResponse);
 
-      paymentDetailsResponseGlobal = paymentDetailsResponse;
-      console.log("this is paymentDetailsResponseGlobal: ", paymentDetailsResponseGlobal);
-
-      component.unmount();
-
-      // Get references to the button and the new amount input's parent container
-      const authMsg = document.querySelector(".auth-result-msg");
-      const authoriseBtn = document.getElementById("authorise-btn");
-      const amountInputContainer = document.querySelector('.input-group'); // Select the parent div of the input
-
-      if (authMsg && authoriseBtn && amountInputContainer) { // Ensure all elements are found
-        if (authMsg.textContent.trim() === "AuthenticationFinished") {
-          authoriseBtn.style.display = "inline-block";
-          amountInputContainer.style.display = "block"; // Make the amount input visible
-        } else {
-          authoriseBtn.style.display = "none";
-          amountInputContainer.style.display = "none"; // Hide the amount input
-        }
+      if (paymentDetailsResponse.action) {
+          // If the response has another action, handle it
+          component.handleAction(paymentDetailsResponse.action);
+      } else {
+          // If there's no action, the flow is complete
+          renderResultTemplate(paymentDetailsResponse.resultCode);
+          paymentDetailsResponseGlobal = paymentDetailsResponse;
+          console.log("this is paymentDetailsResponseGlobal: ", paymentDetailsResponseGlobal);
+          component.unmount();
       }
     };
 
@@ -178,9 +176,10 @@ export async function paymentAuthorisationResponse() {
   }
 
   const paymentDataFromStorage = localStorage.getItem("paymentDataPaymentsAuth");
+  const paymentData = paymentDataFromStorage ? JSON.parse(paymentDataFromStorage) : null;
 
-  if (!paymentDataFromStorage) {
-    console.error("No paymentData found in localStorage. Aborting authorisation.");
+  if (!paymentData && !paymentDetailsResponseGlobal.pspReference) {
+    console.error("No paymentData or pspReference found. Aborting authorisation.");
     return;
   }
 
@@ -198,6 +197,7 @@ export async function paymentAuthorisationResponse() {
     console.warn("Authorisation amount input not found or empty, using default of 500.");
   }
 
+  // Create the base request object
   const requestDataPaymentsAuthorisation = {
     amount: {
       currency: "EUR",
@@ -205,14 +205,12 @@ export async function paymentAuthorisationResponse() {
     },
     channel: "Web",
     reference: "Auth-only_Authorisation_Test",
-    paymentData: JSON.parse(paymentDataFromStorage),
     shopperInteraction: "Ecommerce",
     recurringProcessingModel: "CardOnFile",
     mpiData: {
       authenticationResponse: paymentDetailsResponseGlobal.additionalData?.threeDAuthenticatedResponse,
       directoryResponse: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.transStatus'],
       cavv: paymentDetailsResponseGlobal.additionalData?.cavv,
-      //dsTransID: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.dsTransID'],
       eci: paymentDetailsResponseGlobal.additionalData?.['threeds2.threeDS2Result.eci'],
       threeDSVersion: paymentDetailsResponseGlobal.additionalData?.threeDSVersion,
     },
@@ -223,6 +221,11 @@ export async function paymentAuthorisationResponse() {
     paymentMethod: paymentMethodDetailsPaymentsAuth,
     browserInfo: globalBrowserInfo
   };
+
+  // Conditionally add paymentData only if it exists
+  if (paymentData) {
+    requestDataPaymentsAuthorisation.paymentData = paymentData;
+  }
 
   console.log("requestData for payments (Authorisation): ", requestDataPaymentsAuthorisation);
 
@@ -240,18 +243,15 @@ export async function paymentAuthorisationResponse() {
 document.addEventListener("DOMContentLoaded", () => {
   const authoriseBtn = document.getElementById("authorise-btn");
   const authMsg = document.querySelector(".auth-result-msg");
-  const amountInputContainer = document.querySelector('.input-group'); // Get reference to the amount input's container
+  const amountInputContainer = document.querySelector('.input-group');
 
-  // Initial state: hide the amount input and authorise button
   if (authoriseBtn) {
     authoriseBtn.style.display = "none";
   }
-  if (amountInputContainer) { // Ensure the container is hidden initially
+  if (amountInputContainer) {
     amountInputContainer.style.display = "none";
   }
 
-
-  // Authorise button click handler
   if (authoriseBtn) {
     authoriseBtn.addEventListener("click", () => {
       console.log("Authorisation button clicked");
@@ -259,15 +259,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Observer to watch for changes in authMsg textContent
   if (authMsg && authoriseBtn && amountInputContainer) {
     const observer = new MutationObserver(() => {
-      if (authMsg.textContent.trim() === "AuthenticationFinished") {
+      const currentText = authMsg.textContent.trim();
+      if (currentText === "AuthenticationFinished" || currentText === "AuthenticationNotRequired") {
         authoriseBtn.style.display = "inline-block";
-        amountInputContainer.style.display = "block"; // Make the amount input visible
+        amountInputContainer.style.display = "block";
       } else {
         authoriseBtn.style.display = "none";
-        amountInputContainer.style.display = "none"; // Hide the amount input
+        amountInputContainer.style.display = "none";
       }
     });
     observer.observe(authMsg, { childList: true, subtree: true });
